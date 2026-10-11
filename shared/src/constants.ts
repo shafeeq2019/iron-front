@@ -16,5 +16,7 @@ export const MAX_QUEUE = 9;
 export const NEUTRAL = -1;
 /** Max A* searches per tick across the whole sim. */
 export const PATH_BUDGET = 24;
+/** Max A* node expansions per tick across the whole sim. */
+export const PATH_NODE_BUDGET = 25_000;
 export const ORE_REGROW_INTERVAL = 200;
 export const DISCONNECT_GRACE_MS = 60_000;

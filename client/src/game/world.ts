@@ -97,11 +97,11 @@ export class ClientWorld {
       const dt = Math.min(250, Math.max(16, now - this.lastSnap));
       this.interval = this.interval * 0.8 + dt * 0.2;
     }
+    // Lock in current interpolated positions (relative to the previous snapshot) as the new starting points.
+    this.update(now, true);
     this.lastSnap = now;
     this.snapAt = now;
     this.tick = s.tick;
-    // Lock in current interpolated positions as the new starting points.
-    this.update(now, true);
     const seen = new Set<number>();
     const ents = s.ents;
     for (let i = 0; i < ents.length; i += ENT_STRIDE) {

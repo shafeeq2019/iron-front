@@ -116,7 +116,7 @@ export class GameController {
   private longPress: ReturnType<typeof setTimeout> | null = null;
   private lastTap = { t: 0, id: -1 };
   private keys = new Set<string>();
-  private mouse: { x: number; y: number; inside: boolean } = { x: 0, y: 0, inside: false };
+  private mouse: { x: number; y: number; inside: boolean; moved: boolean } = { x: 0, y: 0, inside: false, moved: false };
   private hoverId = 0;
   private markers: Overlay['markers'] = [];
   private messages: HudMessage[] = [];
@@ -158,7 +158,13 @@ export class GameController {
     on(canvas, 'pointerup', (e) => this.onPointerUp(e));
     on(canvas, 'pointercancel', (e) => this.onPointerCancel(e));
     on(canvas, 'pointerleave', () => { this.mouse.inside = false; });
-    on(canvas, 'pointerenter', () => { this.mouse.inside = true; });
+    on(canvas, 'pointerenter', (e) => {
+      if (e.pointerType !== 'mouse') return;
+      const r = canvas.getBoundingClientRect();
+      this.mouse.x = e.clientX - r.left;
+      this.mouse.y = e.clientY - r.top;
+      this.mouse.inside = true;
+    });
     on(canvas, 'wheel', (e) => this.onWheel(e), { passive: false });
     on(canvas, 'contextmenu', (e) => e.preventDefault());
     on(window, 'keydown', (e) => this.onKeyDown(e));
@@ -727,7 +733,7 @@ export class GameController {
   private onPointerMove(e: PointerEvent) {
     const rect = this.canvas.getBoundingClientRect();
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    if (e.pointerType === 'mouse') { this.mouse.x = x; this.mouse.y = y; this.mouse.inside = true; }
+    if (e.pointerType === 'mouse') { this.mouse.x = x; this.mouse.y = y; this.mouse.inside = true; this.mouse.moved = true; }
     const info = this.pointers.get(e.pointerId);
     if (e.pointerType === 'touch') {
       if (!info) return;
@@ -896,7 +902,8 @@ export class GameController {
     if (this.keys.has('arrowright')) dx += speed;
     if (this.keys.has('arrowup')) dy -= speed;
     if (this.keys.has('arrowdown')) dy += speed;
-    if (s.edgeScroll && this.mouse.inside && !this.pointers.size && document.hasFocus()) {
+    // Only after a real mouse move: a stationary cursor has unknown/stale coordinates.
+    if (s.edgeScroll && this.mouse.inside && this.mouse.moved && !this.pointers.size && document.hasFocus()) {
       const m = 10;
       if (this.mouse.x < m) dx -= speed;
       if (this.mouse.x > this.camera.vw - m) dx += speed;

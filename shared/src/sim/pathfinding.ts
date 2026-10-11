@@ -23,6 +23,8 @@ export class PathFinder {
   private heapF: Float32Array;
   private heapLen = 0;
   searches = 0;
+  /** Nodes expanded by the most recent search (used for per-tick budgeting). */
+  lastExpanded = 0;
 
   constructor(private grid: Grid) {
     const n = grid.w * grid.h;
@@ -93,6 +95,7 @@ export class PathFinder {
     this.push(start, hfn(start));
     let best = start, bestH = hfn(start);
     let expanded = 0;
+    this.lastExpanded = 0;
     while (this.heapLen > 0) {
       const cur = this.pop();
       if (this.closed[cur] === gen) continue;
@@ -122,6 +125,7 @@ export class PathFinder {
         }
       }
     }
+    this.lastExpanded = expanded;
     const out: number[] = [];
     let c = best;
     while (c !== start && c !== -1) {

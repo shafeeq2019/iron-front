@@ -1,4 +1,4 @@
-import { BUILD_RADIUS, NEUTRAL, ORE_REGROW_INTERVAL, PATH_BUDGET, STARTING_CREDITS, TICK_RATE, TILE, FOG_INTERVAL } from '../constants';
+import { BUILD_RADIUS, NEUTRAL, ORE_REGROW_INTERVAL, PATH_BUDGET, PATH_NODE_BUDGET, STARTING_CREDITS, TICK_RATE, TILE, FOG_INTERVAL } from '../constants';
 import { BUILDINGS, DEFS, UNITS, isKnownType, type BuildingDef, type QueueCategory, type UnitDef } from '../data/defs';
 import { FACTIONS, SWEEP_COOLDOWN_TICKS, SWEEP_DURATION_TICKS } from '../data/factions';
 import { getMap, type MapDef } from '../maps/maps';
@@ -518,12 +518,15 @@ export class Game {
     }
 
     // Pathfinding requests, limited per tick.
+    // Bounded by both search count and total expanded nodes to avoid frame spikes.
     let budget = PATH_BUDGET;
-    while (budget > 0 && this.pathQueue.length) {
+    let nodes = PATH_NODE_BUDGET;
+    while (budget > 0 && nodes > 0 && this.pathQueue.length) {
       const u = this.pathQueue.shift()!;
       if (u.dead || !u.needsPath || !u.pathGoal) continue;
       budget--;
       const path = this.pf.findPath({ x: u.x, y: u.y }, u.pathGoal, Math.min(u.radius, 10));
+      nodes -= this.pf.lastExpanded + 50;
       u.needsPath = false;
       if (path && path.length) {
         u.path = path; u.pathIdx = 0; u.moving = true;
