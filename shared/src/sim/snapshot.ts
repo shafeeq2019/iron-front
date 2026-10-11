@@ -51,9 +51,9 @@ export interface Snapshot {
   /** Remembered enemy structures not currently visible: [id, typeIdx, owner, tx, ty]. */
   ghosts: number[];
   /** Visibility bitset (row-major tiles), present when fog changed. */
-  vis?: Uint8Array;
+  vis?: Uint8Array | ArrayBuffer;
   /** Explored bitset; only sent on (re)join. */
-  explored?: Uint8Array;
+  explored?: Uint8Array | ArrayBuffer;
   /** Ore updates: [tileIndex, amount, ...]. */
   ore?: number[];
   events: GameEvent[];

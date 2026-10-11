@@ -96,6 +96,8 @@ export class RemoteConnection implements GameConnection {
   }
   start() {
     this.socket.on('game:snap', this.handler);
+    // Ask for a full resync: anything sent before this screen mounted was missed.
+    this.socket.emit('game:sync');
   }
   stop() {
     this.socket.off('game:snap', this.handler);

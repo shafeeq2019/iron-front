@@ -277,7 +277,7 @@ describe('fog of war', () => {
     for (let i = 0; i < snap.ents.length; i += ENT_STRIDE) ids.add(snap.ents[i]);
     expect(ids.has(near.id)).toBe(true);
     expect(ids.has(far.id)).toBe(false);
-    const vis = unpackBits(snap.vis!, g.map.width * g.map.height);
+    const vis = unpackBits(snap.vis as Uint8Array, g.map.width * g.map.height);
     expect(vis[40 * g.map.width + 50]).toBe(0);
     expect(g.visibleTo(0, far)).toBe(false);
   });

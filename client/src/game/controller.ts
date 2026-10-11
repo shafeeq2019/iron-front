@@ -219,11 +219,14 @@ export class GameController {
 
     const w = this.world;
     if (!this.started && w.me) {
-      this.started = true;
-      const mine = [...w.ents.values()].find((e) => e.owner === w.playerId && (e.type === 'mcv' || e.type === 'hq'));
-      this.camera.zoom = IS_TOUCH ? 1 : 1.25;
-      if (mine) this.camera.centerOn(mine.x, mine.y);
-      audio.startMusic();
+      const mine = [...w.ents.values()].find((e) => e.owner === w.playerId && (e.type === 'mcv' || e.type === 'hq'))
+        ?? [...w.ents.values()].find((e) => e.owner === w.playerId);
+      if (mine || w.me.defeated) {
+        this.started = true;
+        this.camera.zoom = IS_TOUCH ? 1 : 1.25;
+        if (mine) this.camera.centerOn(mine.x, mine.y);
+        audio.startMusic();
+      }
     }
     w.update(now);
     this.processEvents();

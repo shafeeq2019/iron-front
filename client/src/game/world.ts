@@ -143,13 +143,15 @@ export class ClientWorld {
       this.ghosts.push({ id: s.ghosts[i], type: TYPE_IDS[s.ghosts[i + 1]], owner: s.ghosts[i + 2], tx: s.ghosts[i + 3], ty: s.ghosts[i + 4] });
     }
     const n = this.w * this.h;
+    // Over the network binary payloads may arrive as ArrayBuffer.
+    const bytes = (b: Uint8Array | ArrayBuffer) => (b instanceof Uint8Array ? b : new Uint8Array(b));
     if (s.explored) {
-      const ex = unpackBits(s.explored, n);
+      const ex = unpackBits(bytes(s.explored), n);
       for (let i = 0; i < n; i++) if (ex[i]) this.explored[i] = 1;
       this.fogVersion++;
     }
     if (s.vis) {
-      unpackBits(s.vis, n, this.visible);
+      unpackBits(bytes(s.vis), n, this.visible);
       for (let i = 0; i < n; i++) if (this.visible[i]) this.explored[i] = 1;
       this.fogVersion++;
     }

@@ -52,6 +52,8 @@ export interface ClientToServer {
   'room:aiUpdate': (data: { slotId: number; faction?: FactionId; difficulty?: Difficulty; team?: number; color?: string }) => void;
   'room:start': (ack: Ack) => void;
   'game:cmd': (cmd: Command) => void;
+  /** Client is ready to render: server resends full state (explored map, players, ore). */
+  'game:sync': () => void;
   'game:ping': (t: number, ack: (t: number) => void) => void;
 }
 
