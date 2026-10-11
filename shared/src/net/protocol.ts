@@ -26,6 +26,8 @@ export interface LobbyState {
   phase: 'lobby' | 'playing' | 'finished';
   maxPlayers: number;
   lastResult?: MatchResult;
+  /** Slot id of the receiving client (states are tailored per recipient). */
+  you: number;
 }
 
 export interface GameStartInfo {

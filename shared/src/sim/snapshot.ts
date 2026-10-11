@@ -66,7 +66,7 @@ export function packBits(src: Uint8Array): Uint8Array {
   for (let i = 0; i < src.length; i++) if (src[i]) out[i >> 3] |= 1 << (i & 7);
   return out;
 }
-export function unpackBits(bits: Uint8Array, n: number, out = new Uint8Array(n)): Uint8Array {
+export function unpackBits(bits: Uint8Array, n: number, out: Uint8Array = new Uint8Array(n)): Uint8Array {
   for (let i = 0; i < n; i++) out[i] = (bits[i >> 3] >> (i & 7)) & 1;
   return out;
 }

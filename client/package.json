@@ -1,0 +1,23 @@
+{
+  "name": "@iron/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . --noEmit && vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "@iron/shared": "0.1.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "socket.io-client": "4.8.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "5.0.4",
+    "vite": "7.1.12"
+  }
+}
