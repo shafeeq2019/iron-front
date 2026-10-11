@@ -23,6 +23,8 @@ export class Renderer {
   private fogCtx: CanvasRenderingContext2D;
   private fogImg: ImageData;
   private fogVersion = -1;
+  /** Blurred 4px-per-tile fog for smooth edges when zoomed in. */
+  private fogHi: HTMLCanvasElement;
   dpr = 1;
   private smokeTimers = new Map<number, number>();
   /** Stats for the debug overlay. */
@@ -36,6 +38,9 @@ export class Renderer {
     this.fogCanvas.height = world.h;
     this.fogCtx = this.fogCanvas.getContext('2d')!;
     this.fogImg = this.fogCtx.createImageData(world.w, world.h);
+    this.fogHi = document.createElement('canvas');
+    this.fogHi.width = world.w * 4;
+    this.fogHi.height = world.h * 4;
   }
 
   resize(cssW: number, cssH: number, dpr: number) {
@@ -55,6 +60,12 @@ export class Renderer {
       d[i * 4 + 3] = w.visible[i] ? 0 : w.explored[i] ? 125 : 255;
     }
     this.fogCtx.putImageData(this.fogImg, 0, 0);
+    const hc = this.fogHi.getContext('2d')!;
+    hc.clearRect(0, 0, this.fogHi.width, this.fogHi.height);
+    hc.imageSmoothingEnabled = true;
+    hc.filter = 'blur(3px)';
+    hc.drawImage(this.fogCanvas, 0, 0, this.fogHi.width, this.fogHi.height);
+    hc.filter = 'none';
   }
 
   draw(cam: Camera, fx: Effects, ov: Overlay, now: number) {
@@ -124,7 +135,7 @@ export class Renderer {
     // Fog of war (soft edges via bilinear upscaling of a 1px-per-tile mask).
     this.updateFog();
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(this.fogCanvas, 0, 0, world.w * TILE, world.h * TILE);
+    ctx.drawImage(this.fogHi, 0, 0, world.w * TILE, world.h * TILE);
 
     // Overlays above the fog
     for (const e of [...buildings, ...units]) {
