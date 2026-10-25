@@ -141,6 +141,8 @@ export class Renderer3D {
         this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
         this.scene.environmentIntensity = 0.22;
         pmrem.dispose();
+        // Paint every ground texture now (behind the loading screen) so play starts without stutter.
+        this.t3.paint(Infinity, 0, 0, this.gl.capabilities.getMaxAnisotropy());
         this.prewarm();
         try {
           await this.gl.compileAsync(this.scene, this.cam3);
@@ -242,7 +244,7 @@ export class Renderer3D {
     const t = (now - this.start) / 1000;
     const { gx, gz } = this.syncCamera(cam, fx.shake);
     this.updateFog();
-    this.t3.paint(this.quality === 'high' ? 2 : 1, gx, gz, this.gl.capabilities.getMaxAnisotropy());
+    this.t3.paint(1, gx, gz, this.gl.capabilities.getMaxAnisotropy());
     this.t3.updateOre(this.world.ore, this.world.oreVersion);
     this.t3.animate(t);
 
