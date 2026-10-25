@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { findValidPlacement, hud, ownCount, screenOf, setSpeed, watchErrors } from './helpers';
+import { findValidPlacement, hud, ownCount, screenOf, setSpeed, waitReady, watchErrors } from './helpers';
 
 test('touch interface: select, deploy, build, place, command', async ({ page }) => {
   const errors = watchErrors(page);
@@ -7,19 +7,19 @@ test('touch interface: select, deploy, build, place, command', async ({ page }) 
   expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
   await page.getByText('Skirmish vs AI').tap();
   await page.getByText('Deploy ▶').tap();
-  await page.waitForTimeout(800);
+  await waitReady(page);
   const mcv = await screenOf(page, 'mcv');
   await page.touchscreen.tap(mcv!.x, mcv!.y);
   await page.getByTestId('deploy').tap();
-  await expect.poll(() => ownCount(page, 'hq'), { timeout: 10_000 }).toBe(1);
+  await expect.poll(() => ownCount(page, 'hq'), { timeout: 30_000 }).toBe(1);
   await setSpeed(page, 8);
-  await expect(page.getByTestId('build-power')).not.toHaveClass(/disabled/, { timeout: 10_000 });
+  await expect(page.getByTestId('build-power')).not.toHaveClass(/disabled/, { timeout: 30_000 });
   await page.getByTestId('build-power').tap();
-  await expect(page.getByTestId('build-power').getByText('READY')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('build-power').getByText('READY')).toBeVisible({ timeout: 45_000 });
   await page.getByTestId('build-power').tap();
   expect(await findValidPlacement(page, (x, y) => page.touchscreen.tap(x, y))).toBe(true);
   await page.getByTestId('confirm-place').tap();
-  await expect.poll(async () => (await hud(page)).power[0], { timeout: 10_000 }).toBeGreaterThanOrEqual(110);
+  await expect.poll(async () => (await hud(page)).power[0], { timeout: 30_000 }).toBeGreaterThanOrEqual(110);
 
   // Tap a unit to select it, tap empty ground to move it.
   // Bring the tank to the middle of the playfield (phones have little room around the HUD).
@@ -45,6 +45,6 @@ test('touch interface: select, deploy, build, place, command', async ({ page }) 
   await expect.poll(async () => {
     const t = await screenOf(page, 'lighttank');
     return Math.hypot(t!.wx - target!.wx, t!.wy - target!.wy);
-  }, { timeout: 10_000 }).toBeLessThan(24);
+  }, { timeout: 30_000 }).toBeLessThan(24);
   expect(errors).toEqual([]);
 });

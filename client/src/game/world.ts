@@ -204,14 +204,15 @@ export class ClientWorld {
     for (const e of this.ents.values()) {
       if (e.isBuilding) continue;
       const r = (e.def.kind === 'unit' ? e.def.radius : 10) + 4 + radiusBonus;
-      const d = Math.hypot(e.x - x, e.y - y);
+      // Units have height: their bodies appear slightly north of their ground position.
+      const d = Math.min(Math.hypot(e.x - x, e.y - y), Math.hypot(e.x - x, e.y - 7 - y));
       if (d < r && d < bd) { bd = d; best = e; }
     }
     if (best) return best;
     for (const e of this.ents.values()) {
       if (!e.isBuilding) continue;
       const x0 = e.tx * TILE, y0 = e.ty * TILE;
-      if (x >= x0 && x < x0 + e.w * TILE && y >= y0 - 10 && y < y0 + e.h * TILE) return e;
+      if (x >= x0 && x < x0 + e.w * TILE && y >= y0 - 26 && y < y0 + e.h * TILE) return e;
     }
     return null;
   }

@@ -1,5 +1,6 @@
 import { BUILDINGS, TILE, UNITS, type FactionId } from '@iron/shared';
 import { hexToRgb, mix, rgb, shade, type RGB } from './color';
+import { icon3dLazy } from '../render3d/icons3d';
 
 /** Internal supersampling so sprites stay crisp when zoomed in. */
 export const SS = 2;
@@ -569,6 +570,9 @@ const iconCache = new Map<string, string>();
 /** Data-URL icon for build buttons and selection portraits. */
 export function iconFor(type: string, color: string, faction: FactionId): string {
   const key = `${type}|${color}|${faction}`;
+  // Prefer a render of the actual 3D model (generated in the background); 2D sprite meanwhile.
+  const u3 = icon3dLazy(type, color, faction);
+  if (u3) return u3;
   const hit = iconCache.get(key);
   if (hit) return hit;
   const W = 96, H = 72;

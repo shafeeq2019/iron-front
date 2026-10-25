@@ -45,7 +45,7 @@ export class TerrainRenderer {
   readonly rows: number;
   readonly pal: Palette;
 
-  constructor(readonly map: MapDef) {
+  constructor(readonly map: MapDef, readonly opts: { trees?: boolean; cliffShadows?: boolean } = {}) {
     this.cols = Math.ceil((map.width * TILE) / CHUNK);
     this.rows = Math.ceil((map.height * TILE) / CHUNK);
     this.pal = PALETTES[map.theme];
@@ -90,7 +90,17 @@ export class TerrainRenderer {
       }
   }
 
-  private renderChunk(cx: number, cy: number): HTMLCanvasElement {
+  /** Bilinear "dirtiness" of the ground at a world point (1 = dirt tile, 0 = grass). */
+  private dirtWeight(x: number, y: number): number {
+    const fx = x / TILE - 0.5, fy = y / TILE - 0.5;
+    const tx = Math.floor(fx), ty = Math.floor(fy), u = fx - tx, v = fy - ty;
+    const d = (i: number, j: number) => (this.tAt(i, j) === T.Dirt ? 1 : 0);
+    const a = d(tx, ty), b = d(tx + 1, ty), c = d(tx, ty + 1), e = d(tx + 1, ty + 1);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + e) * u * v;
+  }
+
+  /** Renders one CHUNK×CHUNK ground texture (also used as a 3D terrain texture). */
+  renderChunk(cx: number, cy: number): HTMLCanvasElement {
     const cv = document.createElement('canvas');
     cv.width = CHUNK;
     cv.height = CHUNK;
@@ -132,11 +142,6 @@ export class TerrainRenderer {
             if (n2 > 0.8 && !shore) { r += 18; g += 22; b += 26; }
             break;
           }
-          case T.Dirt: {
-            const k = 0.82 + n * 0.32 + (n2 - 0.5) * 0.12;
-            r = pal.dirt[0] * k; g = pal.dirt[1] * k; b = pal.dirt[2] * k;
-            break;
-          }
           case T.Road: {
             const k = 0.9 + n2 * 0.15;
             r = pal.road[0] * k; g = pal.road[1] * k; b = pal.road[2] * k;
@@ -145,17 +150,24 @@ export class TerrainRenderer {
             break;
           }
           default: {
+            // Grass and dirt blend smoothly using an interpolated, noise-perturbed dirt weight.
             const mixT = Math.min(1, Math.max(0, (n - 0.35) * 2.2));
             const a = pal.grass, c2 = pal.grass2;
             const k = 0.9 + (n2 - 0.5) * 0.22;
             r = (a[0] + (c2[0] - a[0]) * mixT) * k;
             g = (a[1] + (c2[1] - a[1]) * mixT) * k;
             b = (a[2] + (c2[2] - a[2]) * mixT) * k;
+            const dw = this.dirtWeight(wx, wy) + (n - 0.5) * 0.6 + (n2 - 0.5) * 0.3;
+            const f = Math.min(1, Math.max(0, (dw - 0.38) / 0.24));
+            if (f > 0) {
+              const kd = 0.82 + n * 0.32 + (n2 - 0.5) * 0.12;
+              r += (pal.dirt[0] * kd - r) * f; g += (pal.dirt[1] * kd - g) * f; b += (pal.dirt[2] * kd - b) * f;
+            }
             if (t === T.Trees) { r *= 0.72; g *= 0.78; b *= 0.72; }
           }
         }
         // Cliffs cast soft shadows to the lower-right.
-        if (t !== T.Rock) {
+        if (t !== T.Rock && this.opts.cliffShadows !== false) {
           if (this.tAt(Math.floor((sx - 7) / TILE), Math.floor((sy - 8) / TILE)) === T.Rock) { r *= 0.7; g *= 0.7; b *= 0.7; }
           // Map edge vignette handled by the rock border.
         }
@@ -164,7 +176,7 @@ export class TerrainRenderer {
       }
     }
     ctx.putImageData(img, 0, 0);
-    this.drawTrees(ctx, ox, oy);
+    if (this.opts.trees !== false) this.drawTrees(ctx, ox, oy);
     this.drawDetails(ctx, ox, oy);
     return cv;
   }

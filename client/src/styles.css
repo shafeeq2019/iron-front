@@ -220,3 +220,8 @@ select:disabled { opacity: 0.7; }
 .selchip img { width: 48px; height: 36px; border-radius: 2px; }
 .placebar { position: absolute; left: 50%; top: 50px; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; background: rgba(0,0,0,0.85); border: 1px solid var(--amber); padding: 6px 10px; border-radius: 4px; white-space: nowrap; }
 @media (max-width: 480px) { .placebar span { display: none; } }
+
+.overlay.loading { background: radial-gradient(ellipse at center, rgba(20,28,18,0.92), rgba(0,0,0,0.97)); z-index: 30; }
+.loading-box { display: flex; flex-direction: column; align-items: center; gap: 10px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--amber-hi); }
+.spinner { width: 48px; height: 48px; border-radius: 50%; border: 4px solid rgba(224,165,38,0.2); border-top-color: var(--amber); animation: spin 0.9s linear infinite; }
+.game-overlay { z-index: 1; }

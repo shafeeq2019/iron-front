@@ -24,6 +24,9 @@ export function GameScreen({ config, exit, restart }: { config: GameConfig; exit
 
   useEffect(() => {
     let conn: GameConnection;
+    let c: GameController | null = null;
+    // Defer heavy renderer setup so the loading screen paints first.
+    const id = setTimeout(() => {
     try {
       if (config.kind === 'local') conn = new LocalConnection(config.mapId, config.players);
       else {
@@ -31,20 +34,24 @@ export function GameScreen({ config, exit, restart }: { config: GameConfig; exit
         if (!s) throw new Error('Not connected to the server');
         conn = new RemoteConnection(s, config.info.you, config.info.mapId);
       }
-      const c = new GameController(conn);
+      c = new GameController(conn);
       c.attach(canvasRef.current!);
       setCtrl(c);
       (window as unknown as { __iron?: GameController }).__iron = c;
-      return () => c.destroy();
     } catch (e) {
       setError((e as Error).message);
     }
+    }, 30);
+    return () => { clearTimeout(id); c?.destroy(); };
   }, []);
 
   return (
     <div className="game-root">
       <canvas ref={canvasRef} className="game-canvas" data-testid="game-canvas" />
       {ctrl && <Hud ctrl={ctrl} online={config.kind === 'remote'} exit={exit} restart={restart} />}
+      {!ctrl && !error && (
+        <div className="overlay loading"><div className="loading-box"><div className="spinner" /><div>Deploying forces…</div></div></div>
+      )}
       {error && (
         <div className="overlay">
           <div className="panel"><p className="warn">{error}</p><button className="btn" onClick={() => exit('menu')}>Main menu</button></div>

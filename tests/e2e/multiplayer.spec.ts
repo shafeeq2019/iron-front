@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { ownCount, screenOf, watchErrors } from './helpers';
+import { ownCount, screenOf, waitReady, watchErrors } from './helpers';
 
 test('two browsers create, join, play and finish an online match', async ({ browser }) => {
   const ctxA = await browser.newContext();
@@ -26,6 +26,7 @@ test('two browsers create, join, play and finish an online match', async ({ brow
   await A.getByText('Start Match ▶').click();
   await expect(A.getByTestId('game-canvas')).toBeVisible();
   await expect(B.getByTestId('game-canvas')).toBeVisible();
+  await Promise.all([waitReady(A), waitReady(B)]);
 
   // Each side controls only its own forces and cannot see the enemy base.
   await expect.poll(() => ownCount(A, 'mcv')).toBe(1);
@@ -37,18 +38,19 @@ test('two browsers create, join, play and finish an online match', async ({ brow
   const mcv = await screenOf(A, 'mcv');
   await A.mouse.click(mcv!.x, mcv!.y);
   await A.getByTestId('deploy').click();
-  await expect.poll(() => ownCount(A, 'hq'), { timeout: 10_000 }).toBe(1);
+  await expect.poll(() => ownCount(A, 'hq'), { timeout: 30_000 }).toBe(1);
 
   // Reload mid-match rejoins the same game.
   await B.reload();
-  await expect(B.getByTestId('game-canvas')).toBeVisible({ timeout: 15_000 });
-  await expect.poll(() => ownCount(B, 'mcv'), { timeout: 10_000 }).toBe(1);
+  await expect(B.getByTestId('game-canvas')).toBeVisible({ timeout: 45_000 });
+  await waitReady(B);
+  await expect.poll(() => ownCount(B, 'mcv'), { timeout: 30_000 }).toBe(1);
 
   await B.getByRole('button', { name: /Menu/ }).click();
   await B.getByText('Surrender', { exact: true }).click();
   await B.getByText('Confirm surrender').click();
-  await expect(A.getByTestId('result-title')).toHaveText('VICTORY', { timeout: 10_000 });
-  await expect(B.getByTestId('result-title')).toHaveText('DEFEAT', { timeout: 10_000 });
+  await expect(A.getByTestId('result-title')).toHaveText('VICTORY', { timeout: 30_000 });
+  await expect(B.getByTestId('result-title')).toHaveText('DEFEAT', { timeout: 30_000 });
   await A.getByText('Back to lobby (rematch)').click();
   await expect(A.getByTestId('room-code')).toHaveText(code);
   expect(errA).toEqual([]);

@@ -3,6 +3,7 @@ import { DEFS, FACTIONS, TICK_RATE, type QueueCategory } from '@iron/shared';
 import { audio } from '../../game/audio';
 import { CATEGORIES, type BuildOption, type GameController, type HudState } from '../../game/controller';
 import { iconFor } from '../../game/render/sprites';
+import { iconVersion } from '../../game/render3d/icons3d';
 import { getSettings, onSettings } from '../../game/settings';
 import { useStore } from '../../game/store';
 import { net } from '../../net/socket';
@@ -20,6 +21,7 @@ interface Props { ctrl: GameController; online: boolean; exit: (to: Screen) => v
 
 export function Hud({ ctrl, online, exit, restart }: Props) {
   const h = useStore(ctrl.hud);
+  useStore(iconVersion);
   const mobile = useMobileLayout();
   const [tab, setTab] = useState<QueueCategory>('building');
   const [menu, setMenu] = useState(false);
@@ -109,6 +111,11 @@ export function Hud({ ctrl, online, exit, restart }: Props) {
           {h.mode === 'attack' && <div className="hint">Attack-move: click a destination (Shift to keep the mode)</div>}
           {h.mode === 'sweep' && <div className="hint">Recon Sweep: click anywhere to reveal the area</div>}
         </>
+      )}
+      {h.loading && (
+        <div className="overlay loading" data-testid="loading">
+          <div className="loading-box"><div className="spinner" /><div>Deploying forces…</div><div className="muted small">Preparing the battlefield</div></div>
+        </div>
       )}
       {menu && !ended && <PauseMenu ctrl={ctrl} online={online} close={() => setMenu(false)} exit={exit} />}
       {ended && <ResultScreen h={h} ctrl={ctrl} online={online} exit={exit} restart={restart} />}

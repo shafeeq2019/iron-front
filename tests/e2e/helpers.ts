@@ -52,3 +52,12 @@ export async function findValidPlacement(page: Page, tap: (x: number, y: number)
   }
   return false;
 }
+
+/** Waits until the 3D renderer has finished its loading phase (shader compilation). */
+export async function waitReady(page: Page) {
+  await page.waitForFunction(() => {
+    const c = (window as unknown as { __iron?: { hud: { get(): { loading: boolean } } } }).__iron;
+    return !!c && !c.hud.get().loading;
+  }, null, { timeout: 120_000 });
+  await page.waitForTimeout(500);
+}

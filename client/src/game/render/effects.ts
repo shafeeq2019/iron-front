@@ -48,6 +48,8 @@ export class Effects {
   shake = 0;
   /** Sweep pulses (world coords) for radar ring animation. */
   pulses: { x: number; y: number; t: number }[] = [];
+  /** Short-lived light flashes from explosions (used by the 3D renderer). */
+  lights: { x: number; y: number; z: number; power: number; life: number }[] = [];
 
   constructor() {
     this.sprites = {
@@ -72,19 +74,20 @@ export class Effects {
     this.particles.push({ kind, x, y, z: 0, vx: 0, vy: 0, vz: 0, life: 0, max: 1, size: 8, grow: 0, color: '', ...o });
   }
 
-  muzzle(x: number, y: number, size: number) {
-    this.add('flash', x, y, { max: 0.07, size, grow: -size * 4 });
+  muzzle(x: number, y: number, size: number, z = 9) {
+    this.add('flash', x, y, { z, max: 0.07, size, grow: -size * 4 });
   }
 
   explosion(x: number, y: number, scale: number, scorch = true) {
-    this.add('flash', x, y, { max: 0.18, size: 26 * scale, grow: 40 * scale });
+    this.add('flash', x, y, { z: 8 * scale, max: 0.18, size: 26 * scale, grow: 40 * scale });
+    this.lights.push({ x, y, z: 14 * scale, power: 1.6 * scale, life: 0.35 });
     for (let i = 0; i < 6 * scale + 2; i++) {
       const a = Math.random() * Math.PI * 2, s = (20 + Math.random() * 40) * scale;
-      this.add('fire', x + Math.cos(a) * 4 * scale, y + Math.sin(a) * 4 * scale, { vx: Math.cos(a) * s, vy: Math.sin(a) * s, max: 0.35 + Math.random() * 0.3, size: (8 + Math.random() * 8) * scale, grow: 10 * scale });
+      this.add('fire', x + Math.cos(a) * 4 * scale, y + Math.sin(a) * 4 * scale, { z: 3 + Math.random() * 8 * scale, vz: (15 + Math.random() * 30) * scale, vx: Math.cos(a) * s, vy: Math.sin(a) * s, max: 0.35 + Math.random() * 0.3, size: (8 + Math.random() * 8) * scale, grow: 10 * scale });
     }
     for (let i = 0; i < 5 * scale + 2; i++) {
       const a = Math.random() * Math.PI * 2, s = (8 + Math.random() * 20) * scale;
-      this.add('smoke', x, y, { vx: Math.cos(a) * s, vy: Math.sin(a) * s - 6, max: 1.2 + Math.random() * 1.2, size: (10 + Math.random() * 8) * scale, grow: 14 * scale });
+      this.add('smoke', x, y, { z: 4 * scale, vz: 18 + Math.random() * 22, vx: Math.cos(a) * s, vy: Math.sin(a) * s, max: 1.2 + Math.random() * 1.2, size: (10 + Math.random() * 8) * scale, grow: 14 * scale });
     }
     for (let i = 0; i < 8 * scale; i++) {
       const a = Math.random() * Math.PI * 2, s = 60 + Math.random() * 120 * scale;
@@ -95,7 +98,7 @@ export class Effects {
         const a = Math.random() * Math.PI * 2, s = 30 + Math.random() * 60;
         this.add('debris', x, y, { vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: 60 + Math.random() * 120, max: 0.8 + Math.random() * 0.6, size: 2 + Math.random() * 2.5, color: '#2a2a26' });
       }
-      this.add('ring', x, y, { max: 0.35, size: 6, grow: 140 * scale, color: 'rgba(255,230,180,' });
+      this.add('ring', x, y, { z: 1, max: 0.35, size: 6, grow: 140 * scale, color: 'rgba(255,230,180,' });
     }
     if (scorch) this.decals.push({ x, y, r: 14 * scale, life: 0, max: 40, kind: 'scorch', rot: Math.random() * 6 });
     if (this.decals.length > 220) this.decals.shift();
@@ -104,15 +107,15 @@ export class Effects {
   dustRing(x: number, y: number, r: number) {
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
-      this.add('dust', x + Math.cos(a) * r, y + Math.sin(a) * r, { vx: Math.cos(a) * 30, vy: Math.sin(a) * 30, max: 1.1, size: 12, grow: 16 });
+      this.add('dust', x + Math.cos(a) * r, y + Math.sin(a) * r, { z: 2, vz: 6, vx: Math.cos(a) * 30, vy: Math.sin(a) * 30, max: 1.1, size: 12, grow: 16 });
     }
   }
 
-  smokePuff(x: number, y: number, dark = false) {
-    this.add('smoke', x + (Math.random() - 0.5) * 6, y, { vx: 6 + Math.random() * 6, vy: -14 - Math.random() * 10, max: 1.6 + Math.random(), size: 6, grow: 14, color: dark ? 'd' : '' });
+  smokePuff(x: number, y: number, dark = false, z = 6) {
+    this.add('smoke', x + (Math.random() - 0.5) * 6, y + (Math.random() - 0.5) * 4, { z, vz: 20 + Math.random() * 14, vx: 6 + Math.random() * 6, vy: -2, max: 1.6 + Math.random(), size: 6, grow: 14, color: dark ? 'd' : '' });
   }
-  fireLick(x: number, y: number) {
-    this.add('fire', x + (Math.random() - 0.5) * 8, y + (Math.random() - 0.5) * 8, { vy: -20, max: 0.4 + Math.random() * 0.3, size: 7 + Math.random() * 5, grow: -4 });
+  fireLick(x: number, y: number, z = 6) {
+    this.add('fire', x + (Math.random() - 0.5) * 8, y + (Math.random() - 0.5) * 8, { z, vz: 22, max: 0.4 + Math.random() * 0.3, size: 7 + Math.random() * 5, grow: -4 });
   }
 
   /** Converts simulation events into visuals and sound. */
@@ -220,6 +223,7 @@ export class Effects {
         if (p.z < 0) { p.z = 0; p.vz *= -0.3; p.vx *= 0.5; p.vy *= 0.5; }
       } else {
         p.vx *= 1 - dt * 1.5; p.vy *= 1 - dt * 1.5;
+        p.z += p.vz * dt; p.vz *= 1 - dt * 0.7;
       }
       p.size = Math.max(0.5, p.size + p.grow * dt);
       ps[w++] = p;
@@ -229,8 +233,8 @@ export class Effects {
       pr.t += dt;
       if (pr.trail) {
         const f = Math.min(1, pr.t / pr.dur);
-        const x = pr.x0 + (pr.x1 - pr.x0) * f, y = pr.y0 + (pr.y1 - pr.y0) * f - Math.sin(f * Math.PI) * pr.arc;
-        this.add('smoke', x, y, { max: 0.6, size: 3, grow: 10, vy: -4 });
+        const x = pr.x0 + (pr.x1 - pr.x0) * f;
+        this.add('smoke', x, pr.y0 + (pr.y1 - pr.y0) * f, { z: Math.sin(f * Math.PI) * pr.arc + 8, max: 0.6, size: 3, grow: 10, vz: 4 });
       }
     }
     this.projectiles = this.projectiles.filter((p) => p.t < p.dur);
@@ -241,6 +245,8 @@ export class Effects {
     for (const d of this.decals) d.life += dt;
     this.decals = this.decals.filter((d) => d.life < d.max);
     for (const p of this.pulses) p.t += dt;
+    for (const l of this.lights) l.life -= dt;
+    this.lights = this.lights.filter((l) => l.life > 0);
     this.pulses = this.pulses.filter((p) => p.t < 2);
   }
 
@@ -327,7 +333,7 @@ export class Effects {
         case 'dust': {
           ctx.globalAlpha = (1 - f) * (p.kind === 'dust' ? 0.55 : p.color === 'd' ? 0.6 : 0.45);
           const spr = this.sprites[p.kind];
-          ctx.drawImage(spr, p.x - p.size, p.y - p.size, p.size * 2, p.size * 2);
+          ctx.drawImage(spr, p.x - p.size, p.y - p.z * 0.6 - p.size, p.size * 2, p.size * 2);
           break;
         }
         case 'fire':
@@ -335,7 +341,7 @@ export class Effects {
         case 'glow': {
           ctx.globalCompositeOperation = 'lighter';
           ctx.globalAlpha = 1 - f;
-          ctx.drawImage(this.sprites[p.kind], p.x - p.size, p.y - p.size, p.size * 2, p.size * 2);
+          ctx.drawImage(this.sprites[p.kind], p.x - p.size, p.y - p.z * 0.6 - p.size, p.size * 2, p.size * 2);
           ctx.globalCompositeOperation = 'source-over';
           break;
         }

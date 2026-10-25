@@ -2,6 +2,8 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { FACTIONS, PLAYER_COLORS, getMap, type FactionId } from '@iron/shared';
 import { TerrainRenderer } from '../game/render/terrain';
 import { iconFor } from '../game/render/sprites';
+import { iconVersion } from '../game/render3d/icons3d';
+import { useStore } from '../game/store';
 
 export function Screen({ title, back, children, wide }: { title: string; back?: () => void; children: ReactNode; wide?: boolean }) {
   return (
@@ -60,6 +62,7 @@ export function MapPreview({ mapId, size = 160, highlight }: { mapId: string; si
 }
 
 export function FactionPicker({ value, onChange, color }: { value: FactionId; onChange: (f: FactionId) => void; color: string }) {
+  useStore(iconVersion);
   return (
     <div className="faction-grid">
       {(Object.keys(FACTIONS) as FactionId[]).map((f) => {

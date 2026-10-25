@@ -57,7 +57,9 @@ export class LocalConnection implements GameConnection {
     const stepMs = 1000 / TICK_RATE;
     let steps = 0;
     const t0 = performance.now();
-    while (this.acc >= stepMs && steps < 8) {
+    // Catch up within a time budget so slow rendering never starves the simulation.
+    if (this.acc > stepMs * 200) this.acc = stepMs * 200;
+    while (this.acc >= stepMs && performance.now() - t0 < 14) {
       this.acc -= stepMs;
       for (const ai of this.ais) ai.update();
       this.game.step();

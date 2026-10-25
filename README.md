@@ -2,7 +2,7 @@
 
 An original, browser-based real-time strategy game in the spirit of late-90s / early-2000s classics: build a base, harvest ore, raise an army, and destroy your opponent — against the computer or against friends online, on desktop or mobile.
 
-All art (units, buildings, terrain, effects) is drawn procedurally at runtime with Canvas 2D, and all sound effects and music are synthesized with WebAudio. The project ships **no third-party art or audio assets** and is not affiliated with any commercial RTS franchise.
+The battlefield is rendered in **3D with Three.js (WebGL 2)**: lit, shadow-casting procedural models, raised cliffs, animated water, instanced forests and ore crystals, particle effects and bloom. All models, textures and effects are generated in code at runtime, and all sound effects and music are synthesized with WebAudio. The project ships **no third-party art or audio assets** and is not affiliated with any commercial RTS franchise.
 
 
 ---
@@ -32,7 +32,7 @@ All art (units, buildings, terrain, effects) is drawn procedurally at runtime wi
 
 - **TypeScript** everywhere (npm workspaces monorepo)
 - **shared/** — the whole game simulation: pure TS, no DOM, deterministic seeded RNG, data-driven definitions
-- **client/** — React 19 + Vite 7 for menus and HUD; custom **Canvas 2D renderer** with cached procedural sprites (chosen over Phaser to keep the bundle small, control every pixel of the procedural art, and run well on phones)
+- **client/** — React 19 + Vite 7 for menus and HUD; **Three.js 0.186 (WebGL 2)** renderer for the battlefield, with an automatic Canvas 2D fallback renderer for browsers without WebGL 2
 - **server/** — Node.js + Socket.IO 4, runs the *same* shared simulation authoritatively
 - **Tests** — Vitest (unit + socket integration) and Playwright (browser end-to-end, desktop + mobile emulation + two-browser multiplayer)
 
@@ -53,7 +53,10 @@ shared/test/     simulation and AI tests
 client/src/
   game/          controller.ts (input, selection, commands, HUD state), connection.ts (local/remote), world.ts
                  (client model + interpolation), camera.ts, audio.ts, settings.ts, store.ts
-  game/render/   renderer.ts, sprites.ts, terrain.ts, effects.ts, minimap.ts, color.ts
+  game/render3d/ renderer3d.ts (scene, lights, camera, shadows, bloom), models.ts (procedural 3D units/buildings),
+                 terrain3d.ts (heightfield, water, trees, rocks, ore), entities3d.ts (instancing), effects3d.ts,
+                 materials.ts (PBR materials + fog-of-war shader), overlay.ts (health bars etc.), icons3d.ts
+  game/render/   2D fallback renderer, ground texture painter, effects simulation, minimap
   ui/            App.tsx, GameScreen.tsx, hud/Hud.tsx, screens/*, common.tsx
   net/socket.ts  multiplayer client
 server/src/      index.ts (entry/env), server.ts (HTTP + sockets), rooms.ts, match.ts, stats.ts
@@ -165,6 +168,16 @@ Internet play requires the server to be reachable over HTTPS/WSS (put it behind 
 
 No secrets are required; nothing secret is shipped to the client.
 
+## Graphics
+
+- Tilted orthographic RTS camera (48° pitch); screen↔ground mapping stays linear so input, minimap and fog use simple math.
+- Directional sun with soft shadow maps that follow the view, sky/ground hemisphere light, image-based reflections (PMREM room environment), ACES tone mapping.
+- Terrain: 512 px chunk meshes over a heightfield (cliffs raised, riverbeds sunk) textured by the procedural ground painter plus a world-space detail texture; animated normal-mapped water; instanced trees, boulders and ore crystals that shrink as fields are mined.
+- Units and buildings: procedural PBR models (extruded armour profiles, lathe-turned towers, rounded hulls) drawn with one InstancedMesh per model part and team-coloured per instance; animated turrets, recoiling barrels, walking infantry, rotating radar dishes, pumping derricks, rising construction.
+- Effects: soft additive particles for fire/flashes/sparks, smoke columns, tracers, lightning, shockwave rings, scorch decals, dynamic explosion lights and bloom (bloom and AA on *High* quality).
+- Fog of war is a blurred visibility texture applied in every material's shader.
+- Build-menu icons are rendered from the same 3D models.
+
 ## Architecture notes
 
 - **Server-authoritative simulation** at 20 ticks/s. Clients send *commands* only; the server validates structure (`sanitizeCommand`) and rules (`Game.issue`: ownership, visibility of targets, prerequisites, funds, placement, cooldowns). Resource balances, production, movement, combat, visibility and victory are computed only on the server.
@@ -186,5 +199,5 @@ Everything in the feature table above, verified by automated tests (Vitest + Pla
 - Matches with more than two humans are supported by the code and lobby but have only been tested with 2 humans (+ AI slots in unit tests).
 - No accounts/authentication — players are identified per browser tab; stats are kept by display name.
 - Mobile tested in Chromium device emulation; not yet on physical iOS/Android hardware. iOS requires a tap before audio can play (handled by unlocking audio on first interaction).
-- Sound and art are procedural placeholders designed to be replaced: sprites are produced by functions in `client/src/game/render/sprites.ts` keyed by unit/building id, so real art can be swapped in per type without engine changes.
+- Models and sounds are procedural. Every unit/building model is a function in `client/src/game/render3d/models.ts` keyed by type id, so authored glTF models could replace them per type without engine changes.
 - Online matches cannot be paused; single-player can.

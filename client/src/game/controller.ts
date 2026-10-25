@@ -8,6 +8,8 @@ import type { GameConnection } from './connection';
 import { Effects } from './render/effects';
 import { Minimap } from './render/minimap';
 import { Renderer, type Overlay } from './render/renderer';
+import { Renderer3D, webglAvailable } from './render3d/renderer3d';
+import { CAMERA_PITCH } from './camera';
 import { getSettings, IS_TOUCH, onSettings } from './settings';
 import { Store } from './store';
 import { ClientWorld, type ViewEntity } from './world';
@@ -60,6 +62,7 @@ export interface HudState {
   simInfo: string;
   boxSelect: boolean;
   connected: boolean;
+  loading: boolean;
 }
 
 const emptyQueues = () => Object.fromEntries(CATEGORIES.map((c) => [c, { items: [], ready: null, onHold: false }])) as unknown as HudState['queues'];
@@ -92,7 +95,7 @@ export class GameController {
   readonly camera: Camera;
   readonly effects = new Effects();
   readonly hud: Store<HudState>;
-  renderer!: Renderer;
+  renderer!: Renderer | Renderer3D;
   minimap!: Minimap;
   private canvas!: HTMLCanvasElement;
   private minimapCanvas: HTMLCanvasElement | null = null;
@@ -135,7 +138,7 @@ export class GameController {
       credits: 0, power: [0, 0], time: 0, queues: emptyQueues(), options: emptyOptions(),
       selection: { count: 0, groups: [], primary: null, canDeploy: false, hasUnits: false },
       sweep: -1, messages: [], mode: 'normal', placement: null, placementValid: false, result: null, defeated: false,
-      players: [], faction: 'cdc', color: '#888', paused: false, fps: 0, simInfo: '', boxSelect: false, connected: true,
+      players: [], faction: 'cdc', color: '#888', paused: false, fps: 0, simInfo: '', boxSelect: false, connected: true, loading: false,
     });
     conn.onSnapshot = (s) => this.world.applySnapshot(s);
     this.effects.setQuality(getSettings().quality);
@@ -146,7 +149,7 @@ export class GameController {
 
   attach(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.renderer = new Renderer(canvas, this.world);
+    this.renderer = this.createRenderer(canvas);
     this.minimap = new Minimap(this.world, this.renderer.terrain.minimapImage());
     this.resize();
     const on = <K extends keyof HTMLElementEventMap>(el: HTMLElement | Window, ev: K, fn: (e: HTMLElementEventMap[K]) => void, opts?: AddEventListenerOptions) => {
@@ -172,8 +175,32 @@ export class GameController {
     on(window, 'blur', () => this.keys.clear());
     on(window, 'resize', () => this.resize());
     this.conn.start();
+    if (this.renderer instanceof Renderer3D) {
+      // Hold a local match until the renderer has compiled its shaders.
+      this.hud.patch({ loading: true });
+      if (this.conn.local) this.conn.setPaused(true);
+      void this.renderer.ready.then(() => {
+        if (this.conn.local && !this.paused) this.conn.setPaused(false);
+        this.hud.patch({ loading: false });
+      });
+    }
     this.lastFrame = performance.now();
     this.raf = requestAnimationFrame(this.frame);
+  }
+
+  /** Prefers the WebGL 3D renderer; falls back to Canvas 2D when WebGL 2 is unavailable. */
+  private createRenderer(canvas: HTMLCanvasElement): Renderer | Renderer3D {
+    if (webglAvailable()) {
+      try {
+        const r = new Renderer3D(canvas, this.world);
+        this.camera.setPitch(CAMERA_PITCH);
+        return r;
+      } catch (e) {
+        console.warn('WebGL renderer failed, using 2D fallback', e);
+      }
+    }
+    this.camera.setPitch(Math.PI / 2);
+    return new Renderer(canvas, this.world);
   }
 
   setMinimapCanvas(c: HTMLCanvasElement | null) {
@@ -185,6 +212,7 @@ export class GameController {
     this.conn.stop();
     for (const c of this.cleanup) c();
     this.cleanup = [];
+    if (this.renderer instanceof Renderer3D) this.renderer.dispose();
     audio.stopMusic();
   }
 
@@ -209,7 +237,7 @@ export class GameController {
 
   setPaused(p: boolean) {
     this.paused = p;
-    this.conn.setPaused(p);
+    this.conn.setPaused(p || this.hud.get().loading);
     this.hud.patch({ paused: p });
   }
 
