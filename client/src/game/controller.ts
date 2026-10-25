@@ -63,6 +63,8 @@ export interface HudState {
   boxSelect: boolean;
   connected: boolean;
   loading: boolean;
+  /** Why the simple 2D renderer is in use (null when 3D is running). */
+  renderNote: string | null;
 }
 
 const emptyQueues = () => Object.fromEntries(CATEGORIES.map((c) => [c, { items: [], ready: null, onHold: false }])) as unknown as HudState['queues'];
@@ -138,7 +140,7 @@ export class GameController {
       credits: 0, power: [0, 0], time: 0, queues: emptyQueues(), options: emptyOptions(),
       selection: { count: 0, groups: [], primary: null, canDeploy: false, hasUnits: false },
       sweep: -1, messages: [], mode: 'normal', placement: null, placementValid: false, result: null, defeated: false,
-      players: [], faction: 'cdc', color: '#888', paused: false, fps: 0, simInfo: '', boxSelect: false, connected: true, loading: false,
+      players: [], faction: 'cdc', color: '#888', paused: false, fps: 0, simInfo: '', boxSelect: false, connected: true, loading: false, renderNote: null,
     });
     conn.onSnapshot = (s) => this.world.applySnapshot(s);
     this.effects.setQuality(getSettings().quality);
@@ -190,6 +192,7 @@ export class GameController {
 
   /** Prefers the WebGL 3D renderer; falls back to Canvas 2D when WebGL 2 is unavailable. */
   private createRenderer(canvas: HTMLCanvasElement): Renderer | Renderer3D {
+    let note = 'This browser does not provide WebGL 2, so the simple 2D view is used. Enable hardware acceleration or update the browser/graphics driver for the 3D battlefield.';
     if (webglAvailable()) {
       try {
         const r = new Renderer3D(canvas, this.world);
@@ -198,8 +201,10 @@ export class GameController {
         return r;
       } catch (e) {
         console.warn('WebGL renderer failed, using 2D fallback', e);
+        note = `The 3D renderer failed to start (${(e as Error)?.message ?? e}), so the simple 2D view is used.`;
       }
     }
+    this.hud.patch({ renderNote: note });
     this.camera.setPitch(Math.PI / 2);
     this.camera.setYaw(0);
     return new Renderer(canvas, this.world);

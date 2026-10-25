@@ -24,6 +24,7 @@ export function Hud({ ctrl, online, exit, restart }: Props) {
   useStore(iconVersion);
   const mobile = useMobileLayout();
   const [tab, setTab] = useState<QueueCategory>('building');
+  const [noteHidden, setNoteHidden] = useState(false);
   const [menu, setMenu] = useState(false);
   const [drawer, setDrawer] = useState(true);
   const [showMap, setShowMap] = useState(true);
@@ -111,6 +112,12 @@ export function Hud({ ctrl, online, exit, restart }: Props) {
           {h.mode === 'attack' && <div className="hint">Attack-move: click a destination (Shift to keep the mode)</div>}
           {h.mode === 'sweep' && <div className="hint">Recon Sweep: click anywhere to reveal the area</div>}
         </>
+      )}
+      {h.renderNote && !noteHidden && (
+        <div className="render-note" data-testid="render-note" role="status">
+          <span>⚠ {h.renderNote}</span>
+          <button className="btn small" onClick={() => setNoteHidden(true)} aria-label="Dismiss">✕</button>
+        </div>
       )}
       {h.loading && (
         <div className="overlay loading" data-testid="loading">
