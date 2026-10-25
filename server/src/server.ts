@@ -87,7 +87,8 @@ export function startServer(opts: ServerOptions = {}) {
     maxHttpBufferSize: 32 * 1024,
     perMessageDeflate: { threshold: 2048 },
     pingInterval: 10_000,
-    pingTimeout: 8_000,
+    // Generous: a client's tab can stall for a while (first-load shader compilation, background throttling).
+    pingTimeout: 30_000,
   });
 
   const sessionsBySocket = new Map<string, Session>();

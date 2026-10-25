@@ -9,7 +9,7 @@ import { Effects } from './render/effects';
 import { Minimap } from './render/minimap';
 import { Renderer, type Overlay } from './render/renderer';
 import { Renderer3D, webglAvailable } from './render3d/renderer3d';
-import { CAMERA_PITCH } from './camera';
+import { CAMERA_PITCH, CAMERA_YAW } from './camera';
 import { getSettings, IS_TOUCH, onSettings } from './settings';
 import { Store } from './store';
 import { ClientWorld, type ViewEntity } from './world';
@@ -194,12 +194,14 @@ export class GameController {
       try {
         const r = new Renderer3D(canvas, this.world);
         this.camera.setPitch(CAMERA_PITCH);
+        this.camera.setYaw(CAMERA_YAW);
         return r;
       } catch (e) {
         console.warn('WebGL renderer failed, using 2D fallback', e);
       }
     }
     this.camera.setPitch(Math.PI / 2);
+    this.camera.setYaw(0);
     return new Renderer(canvas, this.world);
   }
 
@@ -272,9 +274,9 @@ export class GameController {
     }
     this.markers = this.markers.filter((m) => now - m.t < 600);
     if (this.placement) this.updatePlacement();
-    audio.listener.x = this.camera.x + this.camera.viewW / 2;
-    audio.listener.y = this.camera.y + this.camera.viewH / 2;
-    audio.listener.r = Math.max(this.camera.viewW, this.camera.viewH) * 0.7;
+    audio.listener.x = this.camera.cx;
+    audio.listener.y = this.camera.cy;
+    audio.listener.r = Math.max(this.camera.vw, this.camera.vh) / this.camera.zoom * 0.7;
 
     const pointerWorld = this.mouse.inside ? this.camera.screenToWorld(this.mouse.x, this.mouse.y) : null;
     this.renderer.draw(this.camera, this.effects, {
@@ -292,10 +294,53 @@ export class GameController {
     }
   };
 
-  private onScreen = (x: number, y: number) => {
-    const c = this.camera;
-    return x > c.x - 64 && x < c.x + c.viewW + 64 && y > c.y - 64 && y < c.y + c.viewH + 64;
-  };
+  private onScreen = (x: number, y: number) => this.camera.onScreen(x, y, 64);
+
+  /** Visual height of an entity (3D renderer), used for screen-space picking. */
+  private heightOf(e: ViewEntity): number {
+    return this.renderer instanceof Renderer3D ? this.renderer.heightOf(e) : 0;
+  }
+
+  /** Entity under a screen point, accounting for model height in the angled view. */
+  pickScreen(sx: number, sy: number, bonus = 0): ViewEntity | null {
+    const cam = this.camera;
+    let best: ViewEntity | null = null, bd = Infinity;
+    for (const e of this.world.ents.values()) {
+      if (e.isBuilding) continue;
+      const r = ((e.def as UnitDef).radius + 4 + bonus) * cam.zoom + 4;
+      const h = this.heightOf(e);
+      // Distance to the segment between the unit's feet and its top.
+      const a = cam.worldToScreen(e.x, e.y, 0), b = cam.worldToScreen(e.x, e.y, h);
+      const vx = b.x - a.x, vy = b.y - a.y, len2 = vx * vx + vy * vy || 1;
+      const t = Math.max(0, Math.min(1, ((sx - a.x) * vx + (sy - a.y) * vy) / len2));
+      const d = Math.hypot(sx - (a.x + vx * t), sy - (a.y + vy * t));
+      if (d < r && d < bd) { bd = d; best = e; }
+    }
+    if (best) return best;
+    let front: ViewEntity | null = null, fy = -Infinity;
+    for (const e of this.world.ents.values()) {
+      if (!e.isBuilding) continue;
+      const H = this.heightOf(e);
+      for (const f of [0, 0.3, 0.6, 0.9]) {
+        const g = cam.screenToWorld(sx, sy, H * f);
+        if (g.x >= e.tx * TILE && g.x < (e.tx + e.w) * TILE && g.y >= e.ty * TILE && g.y < (e.ty + e.h) * TILE) {
+          const depth = cam.worldToScreen(e.x, e.y).y;
+          if (depth > fy) { fy = depth; front = e; }
+          break;
+        }
+      }
+    }
+    return front;
+  }
+
+  private pickGhostScreen(sx: number, sy: number) {
+    for (const f of [0, 12, 24]) {
+      const g = this.camera.screenToWorld(sx, sy, f);
+      const hit = this.world.pickGhost(g.x, g.y);
+      if (hit) return hit;
+    }
+    return null;
+  }
 
   private processEvents() {
     const w = this.world;
@@ -436,11 +481,11 @@ export class GameController {
   }
 
   /** Right-click / tap command resolution based on what is under the cursor. */
-  contextCommand(wx: number, wy: number) {
+  contextCommand(wx: number, wy: number, sx?: number, sy?: number) {
     const w = this.world;
     const units = this.ownSelectedUnits();
-    const target = w.pick(wx, wy);
-    const ghost = target ? null : w.pickGhost(wx, wy);
+    const target = sx !== undefined ? this.pickScreen(sx, sy!) : w.pick(wx, wy);
+    const ghost = target ? null : sx !== undefined ? this.pickGhostScreen(sx, sy!) : w.pickGhost(wx, wy);
     if (!units.length) {
       // Rally point for selected production buildings.
       const prods = [...this.selected].map((id) => w.ents.get(id)).filter((e) => e && e.isBuilding && (e.def as BuildingDef).produces) as ViewEntity[];
@@ -628,12 +673,12 @@ export class GameController {
   }
 
   private selectBox(x0: number, y0: number, x1: number, y1: number, add: boolean) {
-    const a = this.camera.screenToWorld(Math.min(x0, x1), Math.min(y0, y1));
-    const b = this.camera.screenToWorld(Math.max(x0, x1), Math.max(y0, y1));
+    const ax = Math.min(x0, x1), ay = Math.min(y0, y1), bx = Math.max(x0, x1), by = Math.max(y0, y1);
     const ids: number[] = [];
     for (const e of this.world.ents.values()) {
       if (e.isBuilding || e.owner !== this.world.playerId) continue;
-      if (e.x >= a.x && e.x <= b.x && e.y >= a.y && e.y <= b.y) ids.push(e.id);
+      const p = this.camera.worldToScreen(e.x, e.y, this.heightOf(e) * 0.4);
+      if (p.x >= ax && p.x <= bx && p.y >= ay && p.y <= by) ids.push(e.id);
     }
     // Prefer combat units over harvesters when mixed.
     const combat = ids.filter((id) => { const d = this.world.ents.get(id)!.def as UnitDef; return !d.harvester; });
@@ -645,7 +690,7 @@ export class GameController {
     const ids: number[] = [];
     for (const e of this.world.ents.values()) {
       if (e.owner !== this.world.playerId || e.type !== type) continue;
-      if (e.x >= c.x && e.x <= c.x + c.viewW && e.y >= c.y && e.y <= c.y + c.viewH) ids.push(e.id);
+      if (c.onScreen(e.x, e.y, 0)) ids.push(e.id);
     }
     this.selectIds(ids);
   }
@@ -666,8 +711,7 @@ export class GameController {
   }
 
   private clickSelect(sx: number, sy: number, add: boolean) {
-    const p = this.camera.screenToWorld(sx, sy);
-    const e = this.world.pick(p.x, p.y, IS_TOUCH ? 8 : 0);
+    const e = this.pickScreen(sx, sy, IS_TOUCH ? 8 : 0);
     if (!e) {
       if (!add) this.deselect();
       return;
@@ -702,7 +746,7 @@ export class GameController {
 
   minimapNavigate(cssX: number, cssY: number, command: boolean) {
     if (!this.minimapCanvas) return;
-    const p = this.minimap.toWorld(this.minimapCanvas, cssX, cssY);
+    const p = this.minimap.toWorld(this.minimapCanvas, cssX, cssY, this.camera.yaw);
     if (command && this.selected.size) this.contextCommand(p.x, p.y);
     else this.camera.centerOn(p.x, p.y);
   }
@@ -749,7 +793,7 @@ export class GameController {
     if (e.button === 2) {
       if (this.mode !== 'normal') { this.setMode('normal'); return; }
       const p = this.camera.screenToWorld(x, y);
-      this.contextCommand(p.x, p.y);
+      this.contextCommand(p.x, p.y, x, y);
     }
   }
 
@@ -794,7 +838,7 @@ export class GameController {
       info.x = x; info.y = y;
     }
     const wp = this.camera.screenToWorld(x, y);
-    const h = this.world.pick(wp.x, wp.y);
+    const h = this.pickScreen(x, y);
     this.hoverId = h?.id ?? 0;
     this.canvas.style.cursor = this.cursorFor(h, wp.x, wp.y);
   }
@@ -856,7 +900,7 @@ export class GameController {
     if (this.mode === 'place') { this.movePlacement(x, y); return; }
     if (this.mode === 'attack') { this.attackMove(p.x, p.y); this.setMode('normal'); return; }
     if (this.mode === 'sweep') { this.sweepAt(p.x, p.y); return; }
-    const hit = this.world.pick(p.x, p.y, 8);
+    const hit = this.pickScreen(x, y, 8);
     const units = this.ownSelectedUnits();
     if (hit && hit.owner === this.world.playerId) {
       // Tapping own refinery with harvesters selected, or damaged building with engineers, is a command.
@@ -864,15 +908,15 @@ export class GameController {
         const def = hit.def as BuildingDef;
         const hasHarv = units.some((u) => (u.def as UnitDef).harvester);
         const hasEng = units.some((u) => (u.def as UnitDef).engineer);
-        if ((def.refinery && hasHarv) || (hasEng && hit.hp < hit.maxHp)) { this.contextCommand(p.x, p.y); return; }
+        if ((def.refinery && hasHarv) || (hasEng && hit.hp < hit.maxHp)) { this.contextCommand(p.x, p.y, x, y); return; }
       }
       this.clickSelect(x, y, this.multiSelect);
       return;
     }
-    if (units.length) { this.contextCommand(p.x, p.y); return; }
+    if (units.length) { this.contextCommand(p.x, p.y, x, y); return; }
     // Production building selected: tap sets rally point.
     const prod = [...this.selected].some((id) => { const e = this.world.ents.get(id); return e?.isBuilding && (e.def as BuildingDef).produces; });
-    if (prod && !hit) { this.contextCommand(p.x, p.y); return; }
+    if (prod && !hit) { this.contextCommand(p.x, p.y, x, y); return; }
     this.clickSelect(x, y, false);
   }
 

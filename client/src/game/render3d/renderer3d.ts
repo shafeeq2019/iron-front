@@ -3,9 +3,11 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { BUILDINGS, TILE, X_HARVESTING, X_LOWPOWER, type BuildingDef, type FactionId, type UnitDef } from '@iron/shared';
-import { CAMERA_PITCH, type Camera } from '../camera';
+import { CAMERA_PITCH, CAMERA_YAW, type Camera } from '../camera';
 import type { Effects } from '../render/effects';
 import type { Overlay } from '../render/renderer';
 import { getSettings } from '../settings';
@@ -14,10 +16,22 @@ import { Effects3D } from './effects3d';
 import { Entities3D, makeState } from './entities3d';
 import { fogUniforms, materials } from './materials';
 import { getModel, type ModelDef } from './models';
+import { loadSky, loadTerrainTextures, loadTexture, panelTexture, withTriplanarDetail } from './texturing';
 import { OverlayLayer } from './overlay';
 import { Terrain3D } from './terrain3d';
 
-const SUN_OFFSET = new THREE.Vector3(-520, 900, -380);
+/** Toggles object visibility between composer passes (keeps effects out of the AO pass). */
+class VisibilityPass extends Pass {
+  constructor(private objs: THREE.Object3D[], private show: boolean) {
+    super();
+    this.needsSwap = false;
+  }
+  override render() {
+    for (const o of this.objs) o.visible = this.show;
+  }
+}
+
+const SUN_OFFSET = new THREE.Vector3(-760, 880, -120);
 
 /** Team colour toned toward military paint, per faction. */
 function teamColor(hex: string, faction: FactionId | null): THREE.Color {
@@ -41,7 +55,15 @@ export class Renderer3D {
   private overlay: OverlayLayer;
   private sun: THREE.DirectionalLight;
   private composer: EffectComposer | null = null;
+  /** Adaptive quality: smoothed frame interval and how many steps we've dropped. */
+  private frameMs = 16;
+  private lastFrame = 0;
+  private slowFrames = 0; // ms
+  private readyAt = 0;
+  private degrade = 0;
+  private dprScale = 1;
   private bloom: UnrealBloomPass | null = null;
+  private ao: GTAOPass | null = null;
   private fogTex: THREE.DataTexture;
   private fogData: Uint8Array;
   private fogBase: Float32Array;
@@ -68,15 +90,15 @@ export class Renderer3D {
     const high = this.quality === 'high';
     this.gl = new THREE.WebGLRenderer({ canvas, antialias: high, powerPreference: 'high-performance', alpha: false });
     this.gl.toneMapping = THREE.ACESFilmicToneMapping;
-    this.gl.toneMappingExposure = 0.92;
+    this.gl.toneMappingExposure = 0.86;
     this.gl.outputColorSpace = THREE.SRGBColorSpace;
     this.gl.shadowMap.enabled = true;
     this.gl.shadowMap.type = THREE.PCFShadowMap;
     this.scene.background = new THREE.Color(0x020302);
 
 
-    this.cam3 = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 6000);
-    const hemi = new THREE.HemisphereLight(0xc4d6ff, 0x3a3428, 0.75);
+    this.cam3 = new THREE.OrthographicCamera(-1, 1, 1, -1, 1400, 3600);
+    const hemi = new THREE.HemisphereLight(0xc4d6ff, 0x3a3428, 0.35);
     this.scene.add(hemi);
     this.sun = new THREE.DirectionalLight(0xffe6c4, 3.4);
     this.sun.castShadow = true;
@@ -129,6 +151,16 @@ export class Renderer3D {
     if (high) {
       this.composer = new EffectComposer(this.gl);
       this.composer.addPass(new RenderPass(this.scene, this.cam3));
+      // Ambient occlusion: contact shadows in crevices and under vehicles. Effects/UI layers are hidden from it.
+      const noAO = [this.fx3.group, this.rings, this.frames];
+      this.composer.addPass(new VisibilityPass(noAO, false));
+      this.ao = new GTAOPass(this.scene, this.cam3, 512, 512);
+      this.ao.output = GTAOPass.OUTPUT.Default;
+      this.ao.blendIntensity = 1.15;
+      this.ao.updateGtaoMaterial({ radius: 14, distanceExponent: 1.4, thickness: 6, scale: 1.2, samples: 12 });
+      this.ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+      this.composer.addPass(this.ao);
+      this.composer.addPass(new VisibilityPass(noAO, true));
       this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.4, 1.0);
       this.composer.addPass(this.bloom);
       this.composer.addPass(new OutputPass());
@@ -138,12 +170,16 @@ export class Renderer3D {
       // Let the loading screen paint before the heavy work starts.
       setTimeout(async () => {
         const pmrem = new THREE.PMREMGenerator(this.gl);
-        this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-        this.scene.environmentIntensity = 0.22;
+        try {
+          await this.loadAssets(pmrem);
+        } catch (e) {
+          // Missing textures (offline build): keep procedural look.
+          console.warn('texture load failed', e);
+          this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+          this.scene.environmentIntensity = 0.22;
+        }
         pmrem.dispose();
-        // Paint every ground texture now (behind the loading screen) so play starts without stutter.
-        this.t3.paint(Infinity, 0, 0, this.gl.capabilities.getMaxAnisotropy());
-        this.prewarm();
+        await this.prewarm();
         try {
           await this.gl.compileAsync(this.scene, this.cam3);
           // Also render once off-screen so shadow-depth programs are built.
@@ -153,16 +189,55 @@ export class Renderer3D {
         }
         this.entities.begin();
         this.entities.end();
-        this.isReady = true;
+        this.isReady = true; this.readyAt = performance.now();
         resolve();
       }, 60);
     });
   }
 
+  /** Loads CC0 photo textures and the sky HDRI, then upgrades terrain and model materials. */
+  private async loadAssets(pmrem: THREE.PMREMGenerator) {
+    const an = Math.min(8, this.gl.capabilities.getMaxAnisotropy());
+    const [sky, terrain, plate, painted, concrete, corrugated] = await Promise.all([
+      loadSky(), loadTerrainTextures(this.world.map.theme, an),
+      loadTexture('metal_plate', true, an), loadTexture('painted_metal_shutter', true, an),
+      loadTexture('brushed_concrete', true, an), loadTexture('corrugated_iron', true, an),
+    ]);
+    sky.mapping = THREE.EquirectangularReflectionMapping;
+    this.scene.environment = pmrem.fromEquirectangular(sky).texture;
+    this.scene.environmentIntensity = 0.42;
+    sky.dispose();
+    this.t3.applyTextures(terrain);
+    const mats = materials();
+    const detail = (k: keyof typeof mats, t: THREE.Texture, scale: number, strength: number) => {
+      const m = mats[k];
+      if (m instanceof THREE.MeshStandardMaterial) { withTriplanarDetail(m, t, scale, strength); m.needsUpdate = true; }
+    };
+    const panels = panelTexture();
+    detail('paint', panels, 64, 0.6);
+    detail('paintDark', panels, 56, 0.6);
+    detail('cladA', panels, 120, 0.7);
+    detail('cladB', panels, 120, 0.7);
+    detail('roof', corrugated, 26, 0.7);
+    detail('metal', plate, 22, 0.45);
+    detail('dark', plate, 20, 0.4);
+    detail('grate', plate, 10, 0.8);
+    detail('concrete', concrete, 90, 0.6);
+    detail('white', panels, 90, 0.5);
+    detail('hazard', painted, 30, 0.35);
+    detail('sand', concrete, 14, 0.5);
+    void painted;
+  }
+
   /** Instantiates every model once (far below the map) so all material variants get compiled up front. */
-  private prewarm() {
+  private async prewarm() {
     const types = ['rifle', 'rocket', 'engineer', 'scout', 'lighttank', 'raider', 'heavytank', 'mauler', 'artillery', 'hailstorm', 'harvester', 'mcv',
       'hq', 'power', 'refinery', 'barracks', 'factory', 'radar', 'tech', 'pillbox', 'turret', 'sentinel', 'arcpylon', 'derrick'];
+    // Build geometry one model at a time, yielding so the page (and its network socket) stays responsive.
+    for (const t of types) for (const f of ['cdc', 'esd'] as FactionId[]) {
+      getModel(t, f);
+      await new Promise((r) => setTimeout(r, 0));
+    }
     const s = makeState();
     s.x = -5000; s.y = -5000; s.h = -5000;
     this.entities.begin();
@@ -170,7 +245,8 @@ export class Renderer3D {
     this.entities.end();
   }
 
-  resize(cssW: number, cssH: number, dpr: number) {
+  resize(cssW: number, cssH: number, deviceDpr: number) {
+    const dpr = Math.max(0.6, deviceDpr * this.dprScale);
     this.w = cssW; this.h = cssH; this.dpr = dpr;
     this.gl.setPixelRatio(dpr);
     this.gl.setSize(cssW, cssH, false);
@@ -219,18 +295,23 @@ export class Renderer3D {
 
   private syncCamera(cam: Camera, shake: number) {
     cam.setPitch(CAMERA_PITCH);
+    cam.setYaw(CAMERA_YAW);
     const z = cam.zoom;
-    const gx = cam.x + cam.vw / (2 * z), gz = cam.y + cam.vh / (2 * z * cam.tilt);
+    const gx = cam.cx, gz = cam.cy;
     const c = this.cam3;
     c.left = -cam.vw / (2 * z); c.right = cam.vw / (2 * z);
     c.top = cam.vh / (2 * z); c.bottom = -cam.vh / (2 * z);
     c.updateProjectionMatrix();
-    const D = 2000;
+    const D = 2400;
     const sx = shake ? (Math.random() - 0.5) * shake / z : 0, sy = shake ? (Math.random() - 0.5) * shake / z : 0;
-    c.position.set(gx + sx, D * Math.sin(CAMERA_PITCH), gz + D * Math.cos(CAMERA_PITCH) + sy);
+    // Camera sits on the screen-down side of the target: ground direction (sin yaw, cos yaw).
+    const dx = Math.sin(CAMERA_YAW), dz = Math.cos(CAMERA_YAW);
+    c.position.set(gx + dx * D * Math.cos(CAMERA_PITCH) + sx, D * Math.sin(CAMERA_PITCH), gz + dz * D * Math.cos(CAMERA_PITCH) + sy);
+    c.up.set(0, 1, 0);
     c.lookAt(gx + sx, 0, gz + sy);
     // Shadow frustum follows the view.
-    const size = Math.max(cam.viewW, cam.viewH) * 0.62 + 160;
+    const b = cam.bounds();
+    const size = Math.max(b.x1 - b.x0, b.y1 - b.y0) * 0.55 + 120;
     const sc = this.sun.shadow.camera;
     sc.left = -size; sc.right = size; sc.top = size; sc.bottom = -size;
     sc.updateProjectionMatrix();
@@ -244,13 +325,11 @@ export class Renderer3D {
     const t = (now - this.start) / 1000;
     const { gx, gz } = this.syncCamera(cam, fx.shake);
     this.updateFog();
-    this.t3.paint(1, gx, gz, this.gl.capabilities.getMaxAnisotropy());
     this.t3.updateOre(this.world.ore, this.world.oreVersion);
     this.t3.animate(t);
 
     const world = this.world;
-    const x0 = cam.x - 200, x1 = cam.x + cam.viewW + 200, y0 = cam.y - 200, y1 = cam.y + cam.viewH + 260;
-    const inView = (x: number, y: number) => x > x0 && x < x1 && y > y0 && y < y1;
+    const inView = (x: number, y: number) => cam.onScreen(x, y, 220);
     const ents = this.entities;
     ents.begin();
     const s = this.state;
@@ -326,9 +405,31 @@ export class Renderer3D {
     this.updateGhost(ov);
 
     this.fx3.draw(fx, cam.zoom * this.dpr, now);
+    this.governQuality();
     if (this.composer) this.composer.render();
     else this.gl.render(this.scene, this.cam3);
     this.overlay.draw(world, cam, ov, this.heightOf, now);
+  }
+
+  /**
+   * Drops expensive features when the device can't keep up (sustained < ~20 fps):
+   * first the post-processing chain (AO + bloom), then render resolution.
+   */
+  private governQuality() {
+    const t = performance.now();
+    const dt = this.lastFrame ? Math.min(t - this.lastFrame, 1000) : 16;
+    this.lastFrame = t;
+    if (t - this.readyAt < 4000) return; // ignore warm-up hitches right after loading
+    this.frameMs += (dt - this.frameMs) * 0.1;
+    // Accumulate wall time spent running slow; ~3 s of it triggers a step down.
+    this.slowFrames = this.frameMs > 50 ? this.slowFrames + dt : 0;
+    if (this.slowFrames < 3000 || this.degrade >= 3) return;
+    this.slowFrames = 0;
+    this.frameMs = 16;
+    this.degrade++;
+    if (this.composer) { this.composer.dispose(); this.composer = null; this.degrade = Math.max(this.degrade, 1); return; }
+    this.dprScale *= 0.75;
+    this.resize(this.w, this.h, this.dpr / (this.dprScale / 0.75));
   }
 
   private buildingFx(e: ViewEntity, model: ModelDef, fx: Effects, now: number, built: number, low: boolean) {

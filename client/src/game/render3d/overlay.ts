@@ -38,7 +38,7 @@ export class OverlayLayer {
       const sel = ov.selected.has(e.id), hov = ov.hoverId === e.id;
       const own = e.owner === world.playerId;
       if (!sel && !hov && !(own && e.hp < e.maxHp && !e.isBuilding && z > 0.8)) continue;
-      const p = cam.worldToScreen(e.x, e.isBuilding ? e.ty * TILE + TILE * 0.4 : e.y, heightOf(e) + 6);
+      const p = cam.worldToScreen(e.x, e.y, heightOf(e) + (e.isBuilding ? 10 : 6));
       if (!onScreen(p)) continue;
       const f = Math.max(0, e.hp / e.maxHp);
       const w = e.isBuilding ? e.w * TILE * z * 0.7 : Math.max(18, (e.def as UnitDef).radius * 2.3 * z);

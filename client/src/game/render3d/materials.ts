@@ -39,7 +39,7 @@ export function withFog<T extends THREE.Material>(m: T): T {
       );
   };
   const prevKey = m.customProgramCacheKey?.bind(m);
-  m.customProgramCacheKey = () => `fog-${m.userData.detail ? 'd' : ''}-${prevKey ? prevKey().length : 0}`;
+  m.customProgramCacheKey = () => `fog|${m.userData.detail ? 'd' : ''}|${prevKey ? prevKey() : ''}`;
   return m;
 }
 
@@ -64,6 +64,12 @@ const SPECS: Record<MatKey, MatSpec> = {
   ore: { color: 0xf0b030, roughness: 0.25, metalness: 0.6, emissive: 0x5a3500, emissiveIntensity: 1 },
   wood: { color: 0x5b4330, roughness: 0.9 },
   white: { color: 0xd8d8d2, roughness: 0.55, metalness: 0.2 },
+  /** Neutral building cladding: Coalition light grey-blue, Directorate khaki. */
+  cladA: { color: 0xb4b8b8, roughness: 0.62, metalness: 0.35 },
+  cladB: { color: 0xa69d84, roughness: 0.68, metalness: 0.3 },
+  roof: { color: 0x5c5f5d, roughness: 0.55, metalness: 0.6 },
+  window: { color: 0x1c2a33, roughness: 0.1, metalness: 0.7, emissive: 0x3a4a3a, emissiveIntensity: 0.35 },
+  grate: { color: 0x3a3c3a, roughness: 0.5, metalness: 0.8 },
 };
 
 function makeSet(fog: boolean): Record<MatKey, THREE.Material> {

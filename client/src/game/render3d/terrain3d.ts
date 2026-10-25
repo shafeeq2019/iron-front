@@ -2,44 +2,7 @@ import * as THREE from 'three';
 import { fbm, hash2, TILE, type MapDef } from '@iron/shared';
 import { CHUNK, PALETTES, TerrainRenderer } from '../render/terrain';
 import { withFog } from './materials';
-
-let detailTex: THREE.Texture | null = null;
-/** Tileable fine-grain detail texture (grass blades, grit) modulating the ground colour. */
-function detailTexture(): THREE.Texture {
-  if (detailTex) return detailTex;
-  const N = 256, c = document.createElement('canvas');
-  c.width = c.height = N;
-  const ctx = c.getContext('2d')!;
-  const img = ctx.createImageData(N, N);
-  for (let y = 0; y < N; y++)
-    for (let x = 0; x < N; x++) {
-      const big = fbm((x / N) * 8, (y / N) * 8, 77, 3);
-      const fine = hash2(x, y, 5);
-      const blade = hash2(x >> 1, y, 9) > 0.86 ? 0.18 : 0;
-      const v = 0.5 + (big - 0.5) * 0.35 + (fine - 0.5) * 0.22 + blade;
-      const i = (y * N + x) * 4;
-      img.data[i] = img.data[i + 1] = img.data[i + 2] = Math.max(0, Math.min(255, v * 255));
-      img.data[i + 3] = 255;
-    }
-  ctx.putImageData(img, 0, 0);
-  // Make it tile seamlessly by blending mirrored edges.
-  detailTex = new THREE.CanvasTexture(c);
-  detailTex.wrapS = detailTex.wrapT = THREE.MirroredRepeatWrapping;
-  detailTex.colorSpace = THREE.NoColorSpace;
-  return detailTex;
-}
-
-/** Adds the detail texture to a ground material (world-space UVs from the fog varying). */
-function withDetail(m: THREE.MeshStandardMaterial) {
-  m.userData.detail = true;
-  m.onBeforeCompile = (shader) => {
-    shader.uniforms.detailTex = { value: detailTexture() };
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D detailTex;')
-      .replace('#include <map_fragment>', '#include <map_fragment>\n  vec3 dt = texture2D(detailTex, vFogXZ / 70.0).rgb * texture2D(detailTex, vFogXZ / 23.0 + 0.37).rgb * 4.0;\n  diffuseColor.rgb *= mix(vec3(1.0), dt, 0.55);');
-  };
-  return m;
-}
+import { terrainMaterial, type TerrainTextures } from './texturing';
 
 const enum T { Grass = 0, Dirt = 1, Rock = 2, Water = 3, Trees = 4, Road = 5 }
 
@@ -57,7 +20,7 @@ export class Terrain3D {
   private hw: number;
   private hh: number;
   private heights: Float32Array;
-  private chunks: { mesh: THREE.Mesh; c: number; r: number; done: boolean }[] = [];
+  private chunks: { mesh: THREE.Mesh; c: number; r: number }[] = [];
   private water: THREE.Mesh | null = null;
   private waterNormal: THREE.Texture | null = null;
   private ore: THREE.InstancedMesh;
@@ -65,7 +28,7 @@ export class Terrain3D {
   private oreVersion = -1;
 
   constructor(readonly map: MapDef, quality: 'low' | 'high') {
-    this.painter = new TerrainRenderer(map, { trees: false, cliffShadows: false });
+    this.painter = new TerrainRenderer(map);
     this.hw = map.width * 2 + 1;
     this.hh = map.height * 2 + 1;
     this.heights = this.buildHeights();
@@ -120,6 +83,7 @@ export class Terrain3D {
     const cols = Math.ceil((this.map.width * TILE) / CHUNK), rows = Math.ceil((this.map.height * TILE) / CHUNK);
     const n = CHUNK / STEP;
     const pal = PALETTES[this.map.theme];
+    const placeholderMat = withFog(new THREE.MeshStandardMaterial({ color: new THREE.Color(`rgb(${pal.grass.join(',')})`), roughness: 0.95 }));
     for (let r = 0; r < rows; r++)
       for (let c = 0; c < cols; c++) {
         const ox = c * CHUNK, oy = r * CHUNK;
@@ -147,30 +111,66 @@ export class Terrain3D {
         geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
         geo.setIndex(idx);
         geo.computeBoundingSphere();
-        // Start with a flat placeholder texture so swapping in the painted one never changes the shader.
-        const mat = withFog(withDetail(new THREE.MeshStandardMaterial({ map: placeholder(pal.grass), roughness: 0.95, metalness: 0 })));
-        const mesh = new THREE.Mesh(geo, mat);
+        const mesh = new THREE.Mesh(geo, placeholderMat);
         mesh.receiveShadow = true;
         this.group.add(mesh);
-        this.chunks.push({ mesh, c, r, done: false });
+        this.chunks.push({ mesh, c, r });
       }
   }
 
-  /** Paints pending chunk textures, at most `budget` per call, nearest to (x,y) first. Returns remaining count. */
-  paint(budget: number, x: number, y: number, anisotropy: number): number {
-    const pending = this.chunks.filter((k) => !k.done);
-    pending.sort((a, b) => Math.hypot((a.c + 0.5) * CHUNK - x, (a.r + 0.5) * CHUNK - y) - Math.hypot((b.c + 0.5) * CHUNK - x, (b.r + 0.5) * CHUNK - y));
-    for (const k of pending.slice(0, budget)) {
-      const canvas = this.painter.renderChunk(k.c, k.r);
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.anisotropy = anisotropy;
-      tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-      const m = k.mesh.material as THREE.MeshStandardMaterial;
-      m.map = tex;
-      k.done = true;
-    }
-    return pending.length - Math.min(budget, pending.length);
+  /** Switches the ground to the splat-mapped photo-texture material. */
+  applyTextures(tx: TerrainTextures) {
+    const mat = terrainMaterial(tx, this.buildSplat(), new THREE.Vector2(this.map.width * TILE, this.map.height * TILE));
+    for (const k of this.chunks) k.mesh.material = mat;
+  }
+
+  /**
+   * Splat map (4 texels per tile): R = dirt, G = rock top, B = road, A = wet riverbed.
+   * Tile weights are interpolated, perturbed with noise and blurred for organic borders.
+   */
+  private buildSplat(): THREE.DataTexture {
+    const m = this.map, R = 4;
+    const W = m.width * R, H = m.height * R;
+    const tw = (t: number): [number, number, number, number] =>
+      t === T.Dirt ? [1, 0, 0, 0] : t === T.Trees ? [0.45, 0, 0, 0] : t === T.Rock ? [0, 1, 0, 0] : t === T.Road ? [0, 0, 1, 0] : t === T.Water ? [0.6, 0, 0, 1] : [0, 0, 0, 0];
+    const raw = new Float32Array(W * H * 4);
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const fx = (x + 0.5) / R - 0.5, fy = (y + 0.5) / R - 0.5;
+        const x0 = Math.floor(fx), y0 = Math.floor(fy), u = fx - x0, v = fy - y0;
+        const a = tw(this.tile(x0, y0)), b = tw(this.tile(x0 + 1, y0)), c = tw(this.tile(x0, y0 + 1)), d = tw(this.tile(x0 + 1, y0 + 1));
+        const n1 = fbm(x * 0.09, y * 0.09, 31, 3) - 0.5, n2 = fbm(x * 0.21, y * 0.21, 57, 2) - 0.5;
+        for (let k = 0; k < 4; k++) {
+          let w = a[k] + (b[k] - a[k]) * u + (c[k] - a[k]) * v + (a[k] - b[k] - c[k] + d[k]) * u * v;
+          if (k === 0) w = smoothstepF(0.22, 0.62, w + n1 * 0.7 + n2 * 0.3) * Math.min(1, w * 2.5 + 0.4) + Math.max(0, n1 - 0.32) * 0.6;
+          if (k === 1) w = smoothstepF(0.25, 0.75, w + n2 * 0.4);
+          if (k === 2) w = smoothstepF(0.35, 0.65, w + n2 * 0.15);
+          if (k === 3) w = smoothstepF(0.2, 0.7, w);
+          raw[(y * W + x) * 4 + k] = Math.max(0, Math.min(1, w));
+        }
+      }
+    // One separable box blur pass.
+    const tmp = new Float32Array(raw.length), out = new Uint8Array(raw.length);
+    const rad = 2;
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++)
+        for (let k = 0; k < 4; k++) {
+          let sum = 0, cnt = 0;
+          for (let d = -rad; d <= rad; d++) { const xx = Math.min(W - 1, Math.max(0, x + d)); sum += raw[(y * W + xx) * 4 + k]; cnt++; }
+          tmp[(y * W + x) * 4 + k] = sum / cnt;
+        }
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++)
+        for (let k = 0; k < 4; k++) {
+          let sum = 0, cnt = 0;
+          for (let d = -rad; d <= rad; d++) { const yy = Math.min(H - 1, Math.max(0, y + d)); sum += tmp[(yy * W + x) * 4 + k]; cnt++; }
+          out[(y * W + x) * 4 + k] = Math.round((sum / cnt) * 255);
+        }
+    const tex = new THREE.DataTexture(out, W, H, THREE.RGBAFormat, THREE.UnsignedByteType);
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    return tex;
   }
 
   private buildWater() {
@@ -333,17 +333,9 @@ export class Terrain3D {
   }
 }
 
-let placeholderTex: THREE.Texture | null = null;
-function placeholder(rgb: [number, number, number]): THREE.Texture {
-  if (placeholderTex) return placeholderTex;
-  const c = document.createElement('canvas');
-  c.width = c.height = 4;
-  const ctx = c.getContext('2d')!;
-  ctx.fillStyle = `rgb(${rgb.join(',')})`;
-  ctx.fillRect(0, 0, 4, 4);
-  placeholderTex = new THREE.CanvasTexture(c);
-  placeholderTex.colorSpace = THREE.SRGBColorSpace;
-  return placeholderTex;
+function smoothstepF(a: number, b: number, x: number) {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
 }
 
 function mergeSimple(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {

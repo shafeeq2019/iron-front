@@ -2,7 +2,7 @@
 
 An original, browser-based real-time strategy game in the spirit of late-90s / early-2000s classics: build a base, harvest ore, raise an army, and destroy your opponent — against the computer or against friends online, on desktop or mobile.
 
-The battlefield is rendered in **3D with Three.js (WebGL 2)**: lit, shadow-casting procedural models, raised cliffs, animated water, instanced forests and ore crystals, particle effects and bloom. All models, textures and effects are generated in code at runtime, and all sound effects and music are synthesized with WebAudio. The project ships **no third-party art or audio assets** and is not affiliated with any commercial RTS franchise.
+The battlefield is rendered in **3D with Three.js (WebGL 2)**: lit, shadow-casting procedural models, raised cliffs, animated water, instanced forests and ore crystals, particle effects and bloom. All models and effects are generated in code at runtime, and all sound effects and music are synthesized with WebAudio. The only third-party assets are public-domain (CC0) photo textures and a sky HDRI from Poly Haven, listed in [`client/public/assets/CREDITS.md`](client/public/assets/CREDITS.md). The project is not affiliated with any commercial RTS franchise.
 
 
 ---
@@ -55,8 +55,9 @@ client/src/
                  (client model + interpolation), camera.ts, audio.ts, settings.ts, store.ts
   game/render3d/ renderer3d.ts (scene, lights, camera, shadows, bloom), models.ts (procedural 3D units/buildings),
                  terrain3d.ts (heightfield, water, trees, rocks, ore), entities3d.ts (instancing), effects3d.ts,
-                 materials.ts (PBR materials + fog-of-war shader), overlay.ts (health bars etc.), icons3d.ts
-  game/render/   2D fallback renderer, ground texture painter, effects simulation, minimap
+                 materials.ts (PBR materials + fog-of-war shader), overlay.ts (health bars etc.), icons3d.ts,
+                 texturing.ts (photo-texture loading, splat terrain shader, triplanar detail)
+  game/render/   2D fallback renderer, ground texture painter (minimap/2D), effects simulation, minimap
   ui/            App.tsx, GameScreen.tsx, hud/Hud.tsx, screens/*, common.tsx
   net/socket.ts  multiplayer client
 server/src/      index.ts (entry/env), server.ts (HTTP + sockets), rooms.ts, match.ts, stats.ts
@@ -170,10 +171,11 @@ No secrets are required; nothing secret is shipped to the client.
 
 ## Graphics
 
-- Tilted orthographic RTS camera (48° pitch); screen↔ground mapping stays linear so input, minimap and fog use simple math.
-- Directional sun with soft shadow maps that follow the view, sky/ground hemisphere light, image-based reflections (PMREM room environment), ACES tone mapping.
-- Terrain: 512 px chunk meshes over a heightfield (cliffs raised, riverbeds sunk) textured by the procedural ground painter plus a world-space detail texture; animated normal-mapped water; instanced trees, boulders and ore crystals that shrink as fields are mined.
-- Units and buildings: procedural PBR models (extruded armour profiles, lathe-turned towers, rounded hulls) drawn with one InstancedMesh per model part and team-coloured per instance; animated turrets, recoiling barrels, walking infantry, rotating radar dishes, pumping derricks, rising construction.
+- Classic isometric RTS view: orthographic camera at 45° yaw and 34° pitch (diamond-shaped map, rotated minimap). The screen↔ground mapping is an exact affine transform, so picking, box selection, minimap and fog stay simple math; unit and building picking test their projected height, not just their footprint.
+- Lighting: shadow-casting directional sun that follows the view, a real outdoor sky (HDRI) for image-based light and reflections, ACES tone mapping; on *High* quality also ground-truth ambient occlusion (GTAO) and bloom.
+- Terrain: heightfield chunk meshes (cliffs raised, riverbeds sunk) shaded by a splat-map shader that blends **CC0 photographic textures** (grass/sand/snow, dirt, rock, road) with normal maps, anti-tiling sampling and triplanar rock on slopes; animated normal-mapped water; instanced trees, boulders and ore crystals that shrink as fields are mined.
+- Units and buildings: detailed procedural PBR models — windowed halls, roof vents, railings, ladders, pipes, antennas with beacon lights, floodlights, hazard stripes, helipads, lattice radar masts, cooling towers / smokestacks, side skirts, headlights, exhausts and stowage on vehicles. Main masses use neutral faction cladding (Coalition grey-blue, Directorate khaki) and team colour is reserved for trims, bands, flags and emblems. Triplanar panel/rivet/grime detail and photo metal/concrete textures are applied in the shaders. One InstancedMesh per model part, team-coloured per instance; animated turrets, recoiling barrels, walking infantry, rotating radar dishes, pumping derricks, rising construction.
+- Adaptive quality: if the device can't sustain ~20 fps, the renderer drops post-processing and then resolution automatically.
 - Effects: soft additive particles for fire/flashes/sparks, smoke columns, tracers, lightning, shockwave rings, scorch decals, dynamic explosion lights and bloom (bloom and AA on *High* quality).
 - Fog of war is a blurred visibility texture applied in every material's shader.
 - Build-menu icons are rendered from the same 3D models.

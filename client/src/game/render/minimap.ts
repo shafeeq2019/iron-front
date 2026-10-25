@@ -2,9 +2,12 @@ import { TILE, type BuildingDef } from '@iron/shared';
 import type { Camera } from '../camera';
 import type { ClientWorld } from '../world';
 
-/** Radar minimap: terrain, ore, fog, units, structures and the camera frame. */
+/**
+ * Radar minimap: terrain, ore, fog, units, structures and the camera view.
+ * The map is rotated by the camera yaw (a diamond in isometric view) so it
+ * matches what is on screen.
+ */
 export class Minimap {
-  private base: HTMLCanvasElement;
   private fog: HTMLCanvasElement;
   private fogCtx: CanvasRenderingContext2D;
   private fogImg: ImageData;
@@ -12,8 +15,7 @@ export class Minimap {
   private oreVersion = -1;
   private oreLayer: HTMLCanvasElement;
 
-  constructor(private world: ClientWorld, terrainImage: HTMLCanvasElement) {
-    this.base = terrainImage;
+  constructor(private world: ClientWorld, private base: HTMLCanvasElement) {
     this.fog = document.createElement('canvas');
     this.fog.width = world.w;
     this.fog.height = world.h;
@@ -24,18 +26,30 @@ export class Minimap {
     this.oreLayer.height = world.h;
   }
 
+  /** Canvas-pixel transform for a given camera yaw. */
+  private layout(canvas: HTMLCanvasElement, yaw: number) {
+    const w = this.world;
+    const c = Math.abs(Math.cos(yaw)), s = Math.abs(Math.sin(yaw));
+    const spanX = w.w * c + w.h * s, spanY = w.w * s + w.h * c;
+    const scale = Math.min(canvas.width / spanX, canvas.height / spanY) * 0.98;
+    return { scale, cx: canvas.width / 2, cy: canvas.height / 2 };
+  }
+
   draw(canvas: HTMLCanvasElement, cam: Camera) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const w = this.world;
-    const W = canvas.width, H = canvas.height;
-    const scale = Math.min(W / w.w, H / w.h);
-    const ox = (W - w.w * scale) / 2, oy = (H - w.h * scale) / 2;
+    const { scale, cx, cy } = this.layout(canvas, cam.yaw);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#050705';
-    ctx.fillRect(0, 0, W, H);
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(this.base, ox, oy, w.w * scale, w.h * scale);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Map-space (tiles) transform.
+    ctx.translate(cx, cy);
+    ctx.rotate(cam.yaw);
+    ctx.scale(scale, scale);
+    ctx.translate(-w.w / 2, -w.h / 2);
+    ctx.imageSmoothingEnabled = cam.yaw !== 0;
+    ctx.drawImage(this.base, 0, 0, w.w, w.h);
     if (this.oreVersion !== w.oreVersion || this.fogVersion !== w.fogVersion) {
       this.oreVersion = w.oreVersion;
       const octx = this.oreLayer.getContext('2d')!;
@@ -45,22 +59,22 @@ export class Minimap {
       }
       octx.putImageData(img, 0, 0);
     }
-    ctx.drawImage(this.oreLayer, ox, oy, w.w * scale, w.h * scale);
-    const s = scale / TILE;
+    ctx.drawImage(this.oreLayer, 0, 0, w.w, w.h);
+    const px = 1.6 / scale;
     for (const g of w.ghosts) {
       ctx.fillStyle = w.playerColor(g.owner);
       ctx.globalAlpha = 0.6;
-      ctx.fillRect(ox + g.tx * scale, oy + g.ty * scale, 2 * scale, 2 * scale);
+      ctx.fillRect(g.tx, g.ty, 2, 2);
       ctx.globalAlpha = 1;
     }
     for (const e of w.ents.values()) {
       ctx.fillStyle = w.playerColor(e.owner);
       if (e.isBuilding) {
         const d = e.def as BuildingDef;
-        ctx.fillRect(ox + e.tx * scale, oy + e.ty * scale, Math.max(2, d.w * scale), Math.max(2, d.h * scale));
+        ctx.fillRect(e.tx, e.ty, Math.max(px * 1.5, d.w), Math.max(px * 1.5, d.h));
       } else {
-        const r = Math.max(1.5, scale * 0.9);
-        ctx.fillRect(ox + e.x * s - r / 2, oy + e.y * s - r / 2, r, r);
+        const r = Math.max(px * 1.6, 0.9);
+        ctx.fillRect(e.x / TILE - r / 2, e.y / TILE - r / 2, r, r);
       }
     }
     if (this.fogVersion !== w.fogVersion) {
@@ -70,19 +84,26 @@ export class Minimap {
       this.fogCtx.putImageData(this.fogImg, 0, 0);
     }
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(this.fog, ox, oy, w.w * scale, w.h * scale);
+    ctx.drawImage(this.fog, 0, 0, w.w, w.h);
+    // Camera view footprint.
+    const corners = cam.corners();
     ctx.strokeStyle = '#e8f0e0';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(ox + cam.x * s + 0.5, oy + cam.y * s + 0.5, cam.viewW * s, cam.viewH * s);
+    ctx.lineWidth = 1.2 / scale;
+    ctx.beginPath();
+    corners.forEach((p, i) => (i ? ctx.lineTo(p.x / TILE, p.y / TILE) : ctx.moveTo(p.x / TILE, p.y / TILE)));
+    ctx.closePath();
+    ctx.stroke();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   /** Converts a click on the minimap canvas (CSS px) to world coordinates. */
-  toWorld(canvas: HTMLCanvasElement, cssX: number, cssY: number) {
+  toWorld(canvas: HTMLCanvasElement, cssX: number, cssY: number, yaw = 0) {
     const w = this.world;
-    const W = canvas.width, H = canvas.height;
-    const k = W / canvas.clientWidth;
-    const scale = Math.min(W / w.w, H / w.h);
-    const ox = (W - w.w * scale) / 2, oy = (H - w.h * scale) / 2;
-    return { x: ((cssX * k - ox) / scale) * TILE, y: ((cssY * k - oy) / scale) * TILE };
+    const k = canvas.width / canvas.clientWidth;
+    const { scale, cx, cy } = this.layout(canvas, yaw);
+    const ux = (cssX * k - cx) / scale, uy = (cssY * k - cy) / scale;
+    const c = Math.cos(-yaw), s = Math.sin(-yaw);
+    const tx = ux * c - uy * s + w.w / 2, ty = ux * s + uy * c + w.h / 2;
+    return { x: tx * TILE, y: ty * TILE };
   }
 }
